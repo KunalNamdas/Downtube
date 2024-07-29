@@ -7,6 +7,7 @@ import sys
 import os
 import logging
 import signal
+import subprocess
 
 # Setup logging
 logging.basicConfig(
@@ -50,19 +51,33 @@ parser.add_option("-q", "--quality", dest="quality", default="720",
 
 def download_with_ytdlp(url, only_audio=False, quality="720"):
     """Downloads content from YouTube using yt-dlp"""
-    ydl_opts = {
-        'format': f'bestaudio/best' if only_audio else f'bestvideo[height={quality}]+bestaudio/best',
-        'postprocessors': [{
-            'key': 'FFmpegExtractAudio',
-            'preferredcodec': 'mp3',
-            'preferredquality': '192',
-        }] if only_audio else {},
-        'outtmpl': '%(title)s.%(ext)s'
-    }
+    if only_audio:
+        ydl_opts = {
+            'format': 'bestaudio/best',
+            'outtmpl': '%(title)s.%(ext)s',
+            'postprocessors': [{
+                'key': 'FFmpegExtractAudio',
+                'preferredcodec': 'wav',  # Download audio as WAV for better conversion
+                'preferredquality': '192',
+            }],
+            'postprocessor_args': ['-ar', '44100'],  # Set audio sample rate
+        }
+    else:
+        ydl_opts = {
+            'format': f'bestvideo[height<={quality}]+bestaudio/best',
+            'outtmpl': '%(title)s.%(ext)s',
+        }
+    
     try:
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             ydl.download([url])
         logging.info(f"Downloaded: {url}")
+        if only_audio:
+            # Convert WAV to MP3 using ffmpeg
+            filename = f"{yt_dlp.YoutubeDL().extract_info(url, download=False)['title']}.wav"
+            mp3_filename = filename.replace('.wav', '.mp3')
+            subprocess.run(['ffmpeg', '-i', filename, '-q:a', '0', '-map', 'a', mp3_filename], check=True)
+            os.remove(filename)  # Remove the WAV file after conversion
         return 1
     except Exception as e:
         logging.error(f"Error downloading {url}: {str(e)}")
